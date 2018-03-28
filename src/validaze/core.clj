@@ -537,9 +537,6 @@
   (let [validators (map #(properties-validators (first %1)) props)]
     (map #(%1 props) validators)))
 
-(defn- unroll-objects [m]
-  (specter/transform [specter/MAP-VALS map?] #(mapv (fn [[k v]] {:k k :v v}) %) m))
-
 (defn- validate-conditional-requires [events-schema-reified event-type event-version properties]
   (let [prop-specs ((events-schema-reified event-type) event-version)
         validators (specter/select
