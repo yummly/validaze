@@ -354,17 +354,23 @@
                        (clojure.string/trim))))]
     (refinement-kwd->validator (assoc refinements :keys [:object [validation-fn msg-fn]]) :keys)))
 
-(defn- event-desc->keys-validator [refinements field-descs]
+(defn- prop-set->keys-validator [refinements field-descs]
   (let [{required true optional false} (group-by #(-> % second :required?) field-descs)
         [required optional] [(map first required) (map first optional)]]
     (keys-validator refinements required optional)))
 
-(defn- events-schema->keys-validators [refinements events-schema super-properties-schema]
+(defn- events-schema->keys-validators [refinements events-schema]
   (let [materialized (materialize-event-schema events-schema)]
     (specter/transform
      [specter/MAP-VALS specter/MAP-VALS]
-     #(event-desc->keys-validator refinements (merge %1 super-properties-schema))
+     (partial prop-set->keys-validator refinements)
      materialized)))
+
+(defn- super-props-schema->keys-validators [refinements super-props-schema]
+  (specter/transform
+   [specter/MAP-VALS]
+   (partial prop-set->keys-validator refinements)
+   super-props-schema))
 
 (s/fdef enum-validator
         :args (s/cat :refinements ::refinements-with-string :values (s/coll-of string? :min-count 1))
