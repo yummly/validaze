@@ -717,7 +717,8 @@
                                (merge user-defined-refinements
                                       refinements/user-defined-refinements
                                       normalized-base-refinements))
-         keys-validators (events-schema->keys-validators refinements events-schema super-properties-schema)
+         keys-validators (events-schema->keys-validators refinements events-schema)
+         super-keys-validators (super-props-schema->keys-validators refinements super-properties-schema)
          properties-validators (properties-schemas->validators
                                 user-defined-refinements refinements properties-schema
                                 super-properties-schema-reified)]
