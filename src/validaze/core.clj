@@ -608,7 +608,8 @@
 (s/def ::super-property-field
   (s/keys :req-un [::type ::required?]))
 (s/def ::super-properties-schema
-  (s/map-of ::snake-cased-alpha-numeric ::super-property-field))
+  (s/map-of integer?
+            (s/map-of ::snake-cased-alpha-numeric ::super-property-field)))
 
 (s/def ::property-lists
   (s/map-of keyword? ::property-set))
@@ -693,9 +694,12 @@
                         events-schema-reified)
          properties-schema (into-recursively-sorted-map properties-schema)
          super-properties-schema-raw (into-recursively-sorted-map super-properties-schema)
-         super-properties-schema-reified (-> super-properties-schema-raw reify-required-specs)
+         super-properties-schema-reified (specter/transform
+                                          [specter/MAP-VALS]
+                                          reify-required-specs
+                                          super-properties-schema-raw)
          super-properties-schema (specter/transform
-                                  [specter/MAP-VALS :required?]
+                                  [specter/MAP-VALS specter/MAP-VALS :required?]
                                   first
                                   super-properties-schema-reified)
          refinements-raw (into-recursively-sorted-map refinements)
