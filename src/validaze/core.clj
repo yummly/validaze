@@ -231,14 +231,16 @@
   #(and (valid-includes? %1)
         (s/valid? ::property-set (dissoc %1 :includes))))
 
+(defn- one-based-contig-range? [c]
+  (= c (range 1 (+ 1 (count c)))))
+
 (s/def ::events-schema
   (s/with-gen
     (s/and
      (s/map-of ::snake-cased-alpha-numeric
                (s/map-of integer? ::event-property-set)
                :min-count 1)
-     #(every? (fn [s]
-                (= s (range 1 (+ 1 (count s)))))
+     #(every? one-based-contig-range?
               (specter/select [specter/MAP-VALS (specter/view (comp sort keys))] %)))
     #(gen/let [min-events (gen/return 2)
                max-events (gen/return 5)
@@ -614,8 +616,9 @@
 (s/def ::super-property-field
   (s/keys :req-un [::type ::required?]))
 (s/def ::super-properties-schema
-  (s/map-of integer?
-            (s/map-of ::snake-cased-alpha-numeric ::super-property-field)))
+  (s/and
+   (s/map-of integer? (s/map-of ::snake-cased-alpha-numeric ::super-property-field) :min-count 1)
+   #(one-based-contig-range? (sort (keys %1)))))
 
 (s/def ::property-lists
   (s/map-of keyword? ::property-set))
@@ -630,12 +633,29 @@
               (format "Undefined property list references: %s" (into [] undefined))))
       true)))
 
+(defn- check-super-prop-version-additiveness [super-properties-schema]
+  (let [keys-sets (specter/transform
+                   [specter/MAP-VALS]
+                   (comp set keys)
+                   super-properties-schema)
+        verify-version (fn [acc [version props]]
+                         (let [intersection (clojure.set/intersection acc props)]
+                           (if (not-empty intersection)
+                             (throw (IllegalStateException.
+                                     (format
+                                      "Version %s of super-properties schema duplicates existing properties: %s"
+                                      version (into [] intersection))))
+                             (clojure.set/union acc props))))]
+    (reduce verify-version #{} (into (sorted-map) keys-sets))
+    true))
+
 (defn- schemas-valid? [events-schema events-schema-raw properties-schema
                        super-properties-schema super-properties-schema-raw
                        property-lists]
   (and
    (check-property-references events-schema properties-schema)
    (check-super-property-separateness properties-schema super-properties-schema)
+   (check-super-prop-version-additiveness super-properties-schema)
    (check-spec ::events-schema events-schema-raw)
    (check-property-list-references events-schema-raw property-lists)
    (check-spec ::properties-schema properties-schema)
@@ -728,8 +748,8 @@
          (fn [event-or-events]
            (if-let [msg (validate-base (base-event-validators refinements) event-or-events)]
              msg
-             (when-let [msg (validate-extended
-                             keys-validators properties-validators events-schema-reified event-or-events)]
+             (when-let [msg (validate-extended keys-validators
+                                               properties-validators events-schema-reified event-or-events)]
                msg)))
          {:events-schema events-schema
           :events-schema-reified events-schema-reified
