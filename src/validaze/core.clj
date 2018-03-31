@@ -358,10 +358,10 @@
      materialized)))
 
 (defn- super-props-schema->keys-validators [super-properties-schema]
-  (specter/transform
-   [specter/MAP-VALS]
-   prop-set->keys-validator
-   super-properties-schema))
+  (let [append-version (fn [acc [version props]]
+                         (assoc acc version (merge props (get acc (- version 1)))))
+        denormalized (dissoc (reduce append-version {0 {}} super-properties-schema) 0)]
+    (specter/transform [specter/MAP-VALS] prop-set->keys-validator denormalized)))
 
 (defn- reify-keys-validator [refinements
                              [event-keys-missing event-keys-unexpected]
