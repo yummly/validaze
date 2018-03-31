@@ -625,7 +625,7 @@
 
 (defn- check-spec [spec data]
   (if-not (s/valid? spec data)
-    (throw (IllegalStateException. (s/explain-str spec data)))
+    (throw (IllegalStateException. ^String (s/explain-str spec data)))
     true))
 
 (s/def ::properties-schema
@@ -757,9 +757,10 @@
                                       normalized-base-refinements))
          keys-validators (events-schema->keys-validators events-schema)
          super-keys-validators (super-props-schema->keys-validators super-properties-schema)
+         super-properties-schemas-flattened (apply merge (reverse (vals super-properties-schema-reified)))
          properties-validators (properties-schemas->validators
                                 user-defined-refinements refinements properties-schema
-                                (apply merge (vals super-properties-schema-reified)))]
+                                super-properties-schemas-flattened)]
      (if (schemas-valid? events-schema events-schema-raw properties-schema super-properties-schema
                          super-properties-schema-raw property-lists)
        (with-meta
@@ -773,6 +774,7 @@
           :events-schema-reified events-schema-reified
           :super-properties-schema super-properties-schema
           :super-properties-schema-reified super-properties-schema-reified
+          :super-properties-schemas-flattened super-properties-schemas-flattened
           :user-defined-refinements user-defined-refinements
           :refinements refinements})))))
 
