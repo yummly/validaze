@@ -767,9 +767,8 @@
          (fn [event-or-events]
            (if-let [msg (validate-base (base-event-validators refinements) event-or-events)]
              msg
-             (when-let [msg (validate-extended refinements keys-validators super-keys-validators
-                                               properties-validators events-schema-reified event-or-events)]
-               msg)))
+             (validate-extended refinements keys-validators super-keys-validators
+                                properties-validators events-schema-reified event-or-events)))
          {:events-schema events-schema
           :events-schema-reified events-schema-reified
           :super-properties-schema super-properties-schema
