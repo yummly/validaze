@@ -231,14 +231,16 @@
   #(and (valid-includes? %1)
         (s/valid? ::property-set (dissoc %1 :includes))))
 
+(defn- one-based-contig-range? [c]
+  (= c (range 1 (+ 1 (count c)))))
+
 (s/def ::events-schema
   (s/with-gen
     (s/and
      (s/map-of ::snake-cased-alpha-numeric
                (s/map-of integer? ::event-property-set)
                :min-count 1)
-     #(every? (fn [s]
-                (= s (range 1 (+ 1 (count s)))))
+     #(every? one-based-contig-range?
               (specter/select [specter/MAP-VALS (specter/view (comp sort keys))] %)))
     #(gen/let [min-events (gen/return 2)
                max-events (gen/return 5)
@@ -334,14 +336,39 @@
       true))) ; true if validation succeeded
 
 (s/fdef keys-validator
-        :args (s/cat :refinements ::refinements-with-string-and-object
-                     :required-keys (s/coll-of string?)
+        :args (s/cat :required-keys (s/coll-of string?)
                      :optional-keys (s/coll-of string?))
-        :ret ::validator)
-(defn- keys-validator [refinements required-keys optional-keys]
+        :ret (s/tuple (s/fspec :args (s/cat :v ::json-map) :ret set?)
+                      (s/fspec :args (s/cat :v ::json-map) :ret set?)))
+(defn- keys-validator [required-keys optional-keys]
   (let [missing #(clojure.set/difference (set required-keys) (set (keys %)))
-        additional #(clojure.set/difference (set (keys %)) (set (concat required-keys optional-keys)))
-        validation-fn (fn [v] (and (map? v) (empty? (missing v)) (empty? (additional v))))
+        unexpected #(clojure.set/difference (set (keys %)) (set (concat required-keys optional-keys)))]
+    [missing unexpected]))
+
+(defn- prop-set->keys-validator [field-descs]
+  (let [{required true optional false} (group-by #(-> % second :required?) field-descs)
+        [required optional] [(map first required) (map first optional)]]
+    (keys-validator required optional)))
+
+(defn- events-schema->keys-validators [events-schema]
+  (let [materialized (materialize-event-schema events-schema)]
+    (specter/transform
+     [specter/MAP-VALS specter/MAP-VALS]
+     prop-set->keys-validator
+     materialized)))
+
+(defn- super-props-schema->keys-validators [super-properties-schema]
+  (let [append-version (fn [acc [version props]]
+                         (assoc acc version (merge props (get acc (- version 1)))))
+        denormalized (dissoc (reduce append-version {0 {}} super-properties-schema) 0)]
+    (specter/transform [specter/MAP-VALS] prop-set->keys-validator denormalized)))
+
+(defn- reify-keys-validator [refinements
+                             [event-keys-missing event-keys-unexpected]
+                             [super-props-missing super-props-unexpected]]
+  (let [unexpected (fn [v] (clojure.set/intersection (event-keys-unexpected v) (super-props-unexpected v)))
+        missing (fn [v] (clojure.set/union (event-keys-missing v) (super-props-missing v)))
+        validation-fn (fn [v] (and (map? v) (empty? (missing v)) (empty? (unexpected v))))
         msg-fn (fn [v]
                  (if (not (map? v))
                    "internal error" ; can't happen
@@ -349,22 +376,10 @@
                        (clojure.string/join
                         [(if (not-empty (missing v))
                            (format "Missing required keys: %s." (into [] (missing v))))
-                         (if (not-empty (additional v))
-                           (format "Unexpected keys: %s." (into [] (additional v))))])
+                         (if (not-empty (unexpected v))
+                           (format "Unexpected keys: %s." (into [] (unexpected v))))])
                        (clojure.string/trim))))]
     (refinement-kwd->validator (assoc refinements :keys [:object [validation-fn msg-fn]]) :keys)))
-
-(defn- event-desc->keys-validator [refinements field-descs]
-  (let [{required true optional false} (group-by #(-> % second :required?) field-descs)
-        [required optional] [(map first required) (map first optional)]]
-    (keys-validator refinements required optional)))
-
-(defn- events-schema->keys-validators [refinements events-schema super-properties-schema]
-  (let [materialized (materialize-event-schema events-schema)]
-    (specter/transform
-     [specter/MAP-VALS specter/MAP-VALS]
-     #(event-desc->keys-validator refinements (merge %1 super-properties-schema))
-     materialized)))
 
 (s/fdef enum-validator
         :args (s/cat :refinements ::refinements-with-string :values (s/coll-of string? :min-count 1))
@@ -544,19 +559,23 @@
                     prop-specs)]
     (map #(%1 properties) validators)))
 
-(defn- validate-single-extended [keys-validators properties-validators
-                                 events-schema-reified
-                                 {:strs [event_type event_version properties]}]
-  (let [event-keys-validators (keys-validators event_type)
-        keys-validator (get event-keys-validators event_version)]
-    (if (and event-keys-validators keys-validator)
-      (if-let [msg (keys-validator properties)]
-        [msg]
-        (not-empty
-         (remove nil? (concat (validate-conditional-requires
-                               events-schema-reified event_type event_version properties)
-                              (validate-property-values properties-validators properties)))))
-      [(format "There is no version %s for event '%s'" event_version event_type)])))
+(defn- validate-single-extended [refinements keys-validators super-keys-validators
+                                 properties-validators events-schema-reified
+                                 {:strs [event_type event_version properties super_properties_version]
+                                  :or {super_properties_version 1}}]
+  (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
+    (let [event-keys-validators (keys-validators event_type)
+          event-keys-validator (get event-keys-validators event_version)]
+      (if (and event-keys-validators keys-validator)
+        (let [keys-validator (reify-keys-validator refinements event-keys-validator super-keys-validator)]
+          (if-let [msg (keys-validator properties)]
+            [msg]
+            (not-empty
+             (remove nil? (concat (validate-conditional-requires
+                                   events-schema-reified event_type event_version properties)
+                                  (validate-property-values properties-validators properties))))))
+        [(format "There is no version %s for event '%s'" event_version event_type)]))
+    [(format "There is no super-properties version %s" super_properties_version)]))
 
 (defn- validate-vector-or-single [vec-or-single validator-fn success-fn]
   (let [errors
@@ -567,18 +586,25 @@
       (success-fn vec-or-single)
       errors)))
 
-(defn- validate-extended [keys-validators properties-validators
-                          events-schema-reified event]
+(defn- validate-extended [refinements keys-validators super-keys-validators
+                          properties-validators events-schema-reified event]
   (validate-vector-or-single
    event
-   (partial validate-single-extended keys-validators properties-validators events-schema-reified)
+   (partial validate-single-extended refinements keys-validators
+            super-keys-validators properties-validators events-schema-reified)
    (constantly nil)))
 
 (defn- property->validator [refinements prop refinement-kwd]
   (prepend-prop prop (refinement-kwd->validator refinements refinement-kwd)))
 
+(def ^:private missing-nothing (constantly #{}))
+(def ^:private unexpected-everything (comp set keys))
 (defn- base-event-validators [refinements]
-  [(keys-validator refinements ["event_version" "event_type" "properties"] [])
+  [(reify-keys-validator
+    refinements
+    (keys-validator ["event_version" "event_type" "properties"] ["super_properties_version"])
+    [missing-nothing unexpected-everything])
+   (property->validator refinements "super_properties_version" :integer)
    (property->validator refinements "event_version" :integer)
    (property->validator refinements "event_type" :string)
    (property->validator refinements "properties" :object)])
@@ -599,7 +625,7 @@
 
 (defn- check-spec [spec data]
   (if-not (s/valid? spec data)
-    (throw (IllegalStateException. (s/explain-str spec data)))
+    (throw (IllegalStateException. ^String (s/explain-str spec data)))
     true))
 
 (s/def ::properties-schema
@@ -608,7 +634,9 @@
 (s/def ::super-property-field
   (s/keys :req-un [::type ::required?]))
 (s/def ::super-properties-schema
-  (s/map-of ::snake-cased-alpha-numeric ::super-property-field))
+  (s/and
+   (s/map-of integer? (s/map-of ::snake-cased-alpha-numeric ::super-property-field) :min-count 1)
+   #(one-based-contig-range? (sort (keys %1)))))
 
 (s/def ::property-lists
   (s/map-of keyword? ::property-set))
@@ -623,12 +651,29 @@
               (format "Undefined property list references: %s" (into [] undefined))))
       true)))
 
+(defn- check-super-prop-version-additiveness [super-properties-schema]
+  (let [keys-sets (specter/transform
+                   [specter/MAP-VALS]
+                   (comp set keys)
+                   super-properties-schema)
+        verify-version (fn [acc [version props]]
+                         (let [intersection (clojure.set/intersection acc props)]
+                           (if (not-empty intersection)
+                             (throw (IllegalStateException.
+                                     (format
+                                      "Version %s of super-properties schema duplicates existing properties: %s"
+                                      version (into [] intersection))))
+                             (clojure.set/union acc props))))]
+    (reduce verify-version #{} (into (sorted-map) keys-sets))
+    true))
+
 (defn- schemas-valid? [events-schema events-schema-raw properties-schema
                        super-properties-schema super-properties-schema-raw
                        property-lists]
   (and
    (check-property-references events-schema properties-schema)
    (check-super-property-separateness properties-schema super-properties-schema)
+   (check-super-prop-version-additiveness super-properties-schema)
    (check-spec ::events-schema events-schema-raw)
    (check-property-list-references events-schema-raw property-lists)
    (check-spec ::properties-schema properties-schema)
@@ -693,9 +738,12 @@
                         events-schema-reified)
          properties-schema (into-recursively-sorted-map properties-schema)
          super-properties-schema-raw (into-recursively-sorted-map super-properties-schema)
-         super-properties-schema-reified (-> super-properties-schema-raw reify-required-specs)
+         super-properties-schema-reified (specter/transform
+                                          [specter/MAP-VALS]
+                                          reify-required-specs
+                                          super-properties-schema-raw)
          super-properties-schema (specter/transform
-                                  [specter/MAP-VALS :required?]
+                                  [specter/MAP-VALS specter/MAP-VALS :required?]
                                   first
                                   super-properties-schema-reified)
          refinements-raw (into-recursively-sorted-map refinements)
@@ -707,23 +755,25 @@
                                (merge user-defined-refinements
                                       refinements/user-defined-refinements
                                       normalized-base-refinements))
-         keys-validators (events-schema->keys-validators refinements events-schema super-properties-schema)
+         keys-validators (events-schema->keys-validators events-schema)
+         super-keys-validators (super-props-schema->keys-validators super-properties-schema)
+         super-properties-schemas-flattened (apply merge (reverse (vals super-properties-schema-reified)))
          properties-validators (properties-schemas->validators
                                 user-defined-refinements refinements properties-schema
-                                super-properties-schema-reified)]
+                                super-properties-schemas-flattened)]
      (if (schemas-valid? events-schema events-schema-raw properties-schema super-properties-schema
                          super-properties-schema-raw property-lists)
        (with-meta
          (fn [event-or-events]
            (if-let [msg (validate-base (base-event-validators refinements) event-or-events)]
              msg
-             (when-let [msg (validate-extended
-                             keys-validators properties-validators events-schema-reified event-or-events)]
-               msg)))
+             (validate-extended refinements keys-validators super-keys-validators
+                                properties-validators events-schema-reified event-or-events)))
          {:events-schema events-schema
           :events-schema-reified events-schema-reified
           :super-properties-schema super-properties-schema
           :super-properties-schema-reified super-properties-schema-reified
+          :super-properties-schemas-flattened super-properties-schemas-flattened
           :user-defined-refinements user-defined-refinements
           :refinements refinements})))))
 
