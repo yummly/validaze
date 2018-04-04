@@ -43,43 +43,67 @@
    (fn [_] constant)
    #(format "(fn [_] %s)" (if (string? constant) (format "\"%s\"" constant) constant))))
 
+(def validation-fn-gen
+  #(gen/frequency [[8 (gen/return (with-meta (printable-const-fn true)  {:validates? true}))]
+                   [1 (gen/return (with-meta (printable-const-fn false) {:validates? false}))]]))
+
+(s/def ::primitive-validation-fn
+  (s/with-gen
+    (s/fspec :args (s/cat :v ::json-primitive) :ret boolean?)
+    validation-fn-gen))
+
 (s/def ::validation-fn
   (s/with-gen
-    (s/or :func (s/fspec :args (s/cat :x ::json-map)
+    (s/or :func (s/fspec :args (s/cat :x ::json-primitive)
                          :ret boolean?)
           :set set?
           :spec s/spec?)
-    #(gen/frequency [[8 (gen/return (with-meta (printable-const-fn true) {:validates? true}))]
-                     [1 (gen/return (with-meta (printable-const-fn false) {:validates? false}))]])))
+    validation-fn-gen))
+
+(def message-fn-gen
+  #(gen/let [msg gen/string] (with-meta (printable-const-fn msg) {:msg msg})))
+
+(s/def ::primitive-message-fn
+  (s/with-gen
+    (s/fspec :args (s/cat :x ::json-primitive) :ret string?)
+    message-fn-gen))
 
 (s/def ::message-fn
   (s/with-gen
-    (s/fspec :args (s/cat :x ::json-map)
+    (s/fspec :args (s/cat :x ::json-primitive)
              :ret string?)
-    #(gen/let [msg gen/string] ; maybe try (s/gen string?)
-       (with-meta (printable-const-fn msg) {:msg msg}))))
+    message-fn-gen))
 
 (s/def ::validation-result
-  (s/nilable string?))
+   (s/nilable string?))
 
 (s/fdef validate-to-msg
-        :args (s/cat :validation-fn ::validation-fn :message-fn ::message-fn
-                     :value ::json-map)
+        :args (s/cat :validation-fn ::primitive-validation-fn :message-fn ::primitive-message-fn
+                     :value ::json-primitive)
         :ret ::validation-result)
 (defn- validate-to-msg [validation-fn message-fn value]
   (if-not (s/valid? validation-fn value)
     (message-fn value)))
 
+(defn validator-generator [v-fn-gen m-fn-gen]
+  #(gen/let [v-fn (s/gen v-fn-gen)
+            validates? (gen/return (:validates? (meta v-fn)))
+            msg-fn (s/gen m-fn-gen)]
+    (printable-fn
+     (partial validate-to-msg v-fn msg-fn)
+     (fn [] (if validates? "(fn [_] nil)" (str msg-fn))))))
+
 (s/def ::validator
   (s/with-gen
     (s/fspec :args (s/cat :v ::json-map)
              :ret ::validation-result)
-    #(gen/let [v-fn (s/gen ::validation-fn)
-               validates? (gen/return (:validates? (meta v-fn)))
-               msg-fn (s/gen ::message-fn)]
-       (printable-fn
-        (partial validate-to-msg v-fn msg-fn)
-        (fn [] (if validates? "(fn [_] nil)" (str msg-fn)))))))
+    (validator-generator ::validation-fn ::message-fn)))
+
+(s/def ::primitive-validator
+  (s/with-gen
+    (s/fspec :args (s/cat :v ::json-primitive)
+             :ret ::validation-result)
+    (validator-generator ::primitive-validation-fn ::primitive-message-fn)))
 
 (defn- into-recursively-sorted-map [m]
   (specter/transform
@@ -120,7 +144,7 @@
   (seq->gen (map f val-seq)))
 
 (s/def ::refinement-tup
-  (s/tuple (s/nilable keyword?) (s/tuple ::validation-fn ::message-fn)))
+  (s/tuple (s/nilable keyword?) (s/tuple ::primitive-validation-fn ::primitive-message-fn)))
 
 (s/def ::refinements
   (s/with-gen
@@ -134,9 +158,9 @@
                (map-seq->gen
                 (fn [[kwd prev]]
                   (gen/let [prev-k (gen/frequency [[4 (gen/return prev)] [1 (gen/return nil)]])
-                            validation-fn (s/gen ::validation-fn)
+                            validation-fn (s/gen ::primitive-validation-fn)
                             validates? (gen/return (:validates? (meta validation-fn)))
-                            message-fn (s/gen ::message-fn)
+                            message-fn (s/gen ::primitive-message-fn)
                             msg (gen/return (:msg (meta message-fn)))]
                     [kwd [prev-k (with-meta [validation-fn message-fn] {:validates? validates? :msg msg})]]))
                 broken-cycle)]
@@ -165,6 +189,7 @@
     (s/tuple ::refinements-with-string keyword?)
     #(gen-derived-from-refinements vector)))
 
+(def value (atom nil))
 (s/fdef -refinement-kwd->validator
         :args (s/cat :tup ::refinements-refinement-kwd-tup)
         :fn #(let [[refinements kwd] (-> %1 :args :tup)
@@ -177,7 +202,7 @@
                    failing-msg (if-let [f (some (fn [t] (if (-> t meta :validates? not) (second t))) funcs)] (f nil))
                    returned-msg ((:ret %1) nil)]
                (= returned-msg failing-msg))
-        :ret ::validator)
+        :ret ::primitive-validator)
 (defn- -refinement-kwd->validator [[refinements refinement-kwd]] ; tuple allows both inputs to be generated simult.
   (let [_ (if-not (contains? refinements refinement-kwd)
             (throw (IllegalStateException. (format "Unknown refinement: %s" refinement-kwd))))
@@ -385,12 +410,12 @@
         :args (s/cat :refinements ::refinements-with-string :values (s/coll-of string? :min-count 1))
         :fn #(let [val-set (set (-> %1 :args :values))
                    ret (:ret %1)]
-               (-> (prop/for-all [v (s/gen any?)] ((if (val-set v) nil? string?) (ret v)))
+               (-> (prop/for-all [v (s/gen any?)] (boolean (val-set v)))
                    (partial tc/quick-check 100)))
-        :ret ::validator)
+        :ret ::primitive-validator)
 (defn- enum-validator [refinements values]
   (let [value-set (set values)
-        validation-fn #(value-set %1)
+        validation-fn #(-> %1 value-set boolean)
         msg-fn (fn [_] (format "must be one of: %s" value-set))]
     (refinement-kwd->validator (assoc refinements :enum [:string [validation-fn msg-fn]]) :enum)))
 
