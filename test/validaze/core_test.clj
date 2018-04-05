@@ -25,14 +25,13 @@
 (deftest ^:eftest/slow specd-functions-pass-check
   (instrument-all-syms)
   (let [fns [`core/enum-validator
-          ;   `core/-list-validator
-          ;   `core/-refinement-kwd->validator
-          ;   `core/transform-msg
-          ;   `core/prepend-prop
-          ;   `core/-prop-spec->prop-validator
-          ;   `core/validate-to-msg
-          ;   `core/keys-validator
-             ]]
+             `core/-list-validator
+             `core/-refinement-kwd->validator
+             `core/transform-msg
+             `core/prepend-prop
+             `core/-prop-spec->prop-validator
+             `core/validate-to-msg
+             `core/keys-validator]]
     (spec-check-is-success (stest/check fns))))
 
 (deftest generator-spec-congruence
@@ -42,11 +41,12 @@
   (doseq [spec '(::core/json-map
                  ::core/refinements
                  ::core/refinements-with-string
+                 ::core/refinements-with-string-and-object
                  ::core/refinements-refinement-kwd-tup
                  ::core/snake-cased-alpha-numeric
                  ::core/events-schema
                  ::core/refinements-property-refinement-tup
-                 ::core/primitive-validation-fn
+                 ::core/value-level-validation-fn
                  ::core/primitive-message-fn
                  ::core/validation-fn
                  ::core/message-fn

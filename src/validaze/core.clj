@@ -47,14 +47,15 @@
   #(gen/frequency [[8 (gen/return (with-meta (printable-const-fn true)  {:validates? true}))]
                    [1 (gen/return (with-meta (printable-const-fn false) {:validates? false}))]]))
 
-(s/def ::primitive-validation-fn
+(s/def ::value-level-validation-fn
   (s/with-gen
-    (s/fspec :args (s/cat :v ::json-primitive) :ret boolean?)
+    (s/fspec :args (s/cat :v (s/or :primitive ::json-primitive :seq sequential? :map map?))
+             :ret boolean?)
     validation-fn-gen))
 
 (s/def ::validation-fn
   (s/with-gen
-    (s/or :func (s/fspec :args (s/cat :x ::json-primitive)
+    (s/or :func (s/fspec :args (s/cat :x ::json-map)
                          :ret boolean?)
           :set set?
           :spec s/spec?)
@@ -78,7 +79,7 @@
    (s/nilable string?))
 
 (s/fdef validate-to-msg
-        :args (s/cat :validation-fn ::primitive-validation-fn :message-fn ::primitive-message-fn
+        :args (s/cat :validation-fn ::value-level-validation-fn :message-fn ::primitive-message-fn
                      :value ::json-primitive)
         :ret ::validation-result)
 (defn- validate-to-msg [validation-fn message-fn value]
@@ -103,7 +104,7 @@
   (s/with-gen
     (s/fspec :args (s/cat :v ::json-primitive)
              :ret ::validation-result)
-    (validator-generator ::primitive-validation-fn ::primitive-message-fn)))
+    (validator-generator ::value-level-validation-fn ::primitive-message-fn)))
 
 (defn- into-recursively-sorted-map [m]
   (specter/transform
@@ -144,7 +145,7 @@
   (seq->gen (map f val-seq)))
 
 (s/def ::refinement-tup
-  (s/tuple (s/nilable keyword?) (s/tuple ::primitive-validation-fn ::primitive-message-fn)))
+  (s/tuple (s/nilable keyword?) (s/tuple ::value-level-validation-fn ::primitive-message-fn)))
 
 (s/def ::refinements
   (s/with-gen
@@ -158,7 +159,7 @@
                (map-seq->gen
                 (fn [[kwd prev]]
                   (gen/let [prev-k (gen/frequency [[4 (gen/return prev)] [1 (gen/return nil)]])
-                            validation-fn (s/gen ::primitive-validation-fn)
+                            validation-fn (s/gen ::value-level-validation-fn)
                             validates? (gen/return (:validates? (meta validation-fn)))
                             message-fn (s/gen ::primitive-message-fn)
                             msg (gen/return (:msg (meta message-fn)))]
@@ -421,16 +422,17 @@
 
 (s/fdef -list-validator
         :args (s/cat :udr ::refinements :tup ::refinements-refinement-kwd-tup)
-        :ret ::validator)
+        :ret ::primitive-validator)
 (defn- -list-validator [user-defined-refinements [refinements inner-type]]
   (let [validator (refinement-kwd->validator refinements inner-type)
         is-user-defined? (contains? user-defined-refinements inner-type)
-        validation-fn (fn [v] (every? #(nil? (validator %1)) v))
+        validation-fn (fn [v] (and (sequential? v) (every? #(validator %1) v)))
         msg-fn (fn [v] (format "must be a vector of type '%s'%s"
                                (name inner-type)
                                (if is-user-defined?
                                  (format " and '%s' %s" (name inner-type) (some identity (map validator v)))
                                  "")))]
+    (reset! value validation-fn)
     (refinement-kwd->validator (assoc refinements
                                       :list [nil [vector? (fn [_] "must be a vector")]]
                                       :elements [:list [validation-fn msg-fn]]) :elements)))
@@ -478,7 +480,7 @@
 
 (s/fdef transform-msg
         :args (s/cat :prop ::snake-cased-alpha-numeric
-                     :validator ::validator
+                     :validator ::primitive-validator
                      :xfm (s/fspec :args (s/cat :msg string?)
                                    :ret string?))
         :ret ::validator)
@@ -490,7 +492,7 @@
 
 (s/fdef prepend-prop
         :args (s/cat :prop ::snake-cased-alpha-numeric
-                     :validator ::validator)
+                     :validator ::primitive-validator)
         :ret ::validator)
 (defn- prepend-prop [prop validator]
   (transform-msg prop validator #(format "'%s' %s" prop %1)))
