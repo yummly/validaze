@@ -6,7 +6,11 @@
             [clojure.spec.test.alpha :as stest]
             [clojure.test.check.generators :as gen]))
 
+(defn instrument-all-syms []
+  (stest/instrument (stest/instrumentable-syms)))
+
 (defn spec-check-is-success [check-res]
+  (stest/summarize-results check-res)
   (if (nil? check-res)
     (is false "stest/check result was nil. did you pass it any valid symbols?")
     (let [check #(let [res %1]
@@ -19,6 +23,7 @@
       (format "`valid?` failure explanation:\r\n%s" (s/explain-str spec data))))
 
 (deftest ^:eftest/slow specd-functions-pass-check
+  (instrument-all-syms)
   (let [fns [`core/enum-validator
              `core/-list-validator
              `core/-refinement-kwd->validator
@@ -30,20 +35,25 @@
     (spec-check-is-success (stest/check fns))))
 
 (deftest generator-spec-congruence
+  (instrument-all-syms)
   ;; These are the specs in our project defined with `with-gen`.
   ;; Verifies that generator and spec are congruent with one another.
   (doseq [spec '(::core/json-map
                  ::core/refinements
                  ::core/refinements-with-string
+                 ::core/refinements-with-string-and-object
                  ::core/refinements-refinement-kwd-tup
                  ::core/snake-cased-alpha-numeric
                  ::core/events-schema
                  ::core/refinements-property-refinement-tup
+                 ::core/value-level-validation-fn
+                 ::core/primitive-message-fn
                  ::core/validation-fn
                  ::core/message-fn
                  ::core/enum-refinement
                  ::core/list-refinement
                  ::core/object-refinement
+                 ::core/primitive-validator
                  ::core/validator)]
     (is (gen/sample (s/gen spec) 1000)
         (format "incongruence between spec and its generator: %s" spec))))
