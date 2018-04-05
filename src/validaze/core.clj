@@ -840,7 +840,7 @@
   (let [[_ refinements] (prepare-refinements refinements normalized-base-refinements)]
     (specter/transform
      [specter/ALL]
-     (fn [[kwd refinement-tup]]
+     (fn [[kwd _]]
           [kwd (-refinement-kwd->validator [refinements kwd])])
      refinements)))
 
