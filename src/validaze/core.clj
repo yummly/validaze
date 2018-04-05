@@ -14,8 +14,21 @@
 (s/def ::nonempty-string
   (s/and string? seq))
 
+(def ^:private base-refinements
+  {:string string?
+   :object map?
+   :number number?
+   :integer integer?
+   :boolean boolean?})
+
+(def ^:dynamic primitive-type-to-gen nil)
 (s/def ::nonnilable-json-primitive
-  (s/or :b boolean? :n number? :s string?))
+  (s/with-gen
+    (s/or :b boolean? :n number? :s string?)
+    #(let [selected (select-keys base-refinements [:boolean :number :string])]
+      ((merge {nil (gen/one-of (map (fn [p] (s/gen p)) (vals selected)))}
+              (specter/transform [specter/MAP-VALS] s/gen selected))
+       primitive-type-to-gen))))
 
 (s/def ::json-primitive
   (s/nilable ::nonnilable-json-primitive))
@@ -116,12 +129,7 @@
       (map? %1) (into (sorted-map-by order/rank) %1)
       (coll? %1) %1) m))
 
-(def ^:private base-refinements
-  {:string string?
-   :object map?
-   :number number?
-   :integer integer?
-   :boolean boolean?})
+
 
 (def ^:private vowels #{\a \e \i \o \u})
 (def ^:private normalized-base-refinements
@@ -724,6 +732,17 @@
   (specter/transform [specter/MAP-VALS specter/MAP-VALS (specter/submap [:includes])]
                      #(apply merge (map property-lists (%1 :includes))) m))
 
+(defn- prepare-refinements [user-defined-refinements normalized-base-refinements]
+  (let [user-defined-refinements (specter/transform
+                                  [specter/MAP-VALS set?]
+                                  #(do [:string [%1 (fn [_] (str "must be one of: " %1))]])
+                                  user-defined-refinements)
+        refinements (s/assert ::refinements
+                              (merge user-defined-refinements
+                                     refinements/user-defined-refinements
+                                     normalized-base-refinements))]
+    [user-defined-refinements refinements]))
+
 (s/fdef validator
         :args (s/alt
                :binary
@@ -774,14 +793,8 @@
                                   first
                                   super-properties-schema-reified)
          refinements-raw (into-recursively-sorted-map refinements)
-         user-defined-refinements (specter/transform
-                                   [specter/MAP-VALS set?]
-                                   #(do [:string [%1 (fn [_] (str "must be one of: " %1))]])
-                                   refinements-raw)
-         refinements (s/assert ::refinements
-                               (merge user-defined-refinements
-                                      refinements/user-defined-refinements
-                                      normalized-base-refinements))
+         [user-defined-refinements refinements]
+         (prepare-refinements refinements-raw normalized-base-refinements)
          keys-validators (events-schema->keys-validators events-schema)
          super-keys-validators (super-props-schema->keys-validators super-properties-schema)
          super-properties-schemas-flattened (apply merge (reverse (vals super-properties-schema-reified)))
@@ -804,4 +817,32 @@
           :user-defined-refinements user-defined-refinements
           :refinements refinements})))))
 
+(defn- refinement->base-refinement [refinements refinement]
+  (loop [cur refinement]
+    (let [[nxt _] (refinements cur)]
+      (if (nil? nxt) cur (recur nxt)))))
+
+(s/fdef refinements->validators
+        :args (s/cat :refinements
+                     (fn [v]
+                       (every?
+                        identity
+                        (map
+                         (fn [[refinement [kwd refinement-spec]]]
+                           (or (set? refinement-spec)
+                               (binding [primitive-type-to-gen
+                                         (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
+                                 (not (s/valid? ::refinement-tup refinement-spec)))))
+                         v)))
+                     )
+        :ret (s/map-of keyword? ::validator))
+(defn refinements->validators [refinements]
+  (let [[_ refinements] (prepare-refinements refinements normalized-base-refinements)]
+    (specter/transform
+     [specter/ALL]
+     (fn [[kwd refinement-tup]]
+          [kwd (-refinement-kwd->validator [refinements kwd])])
+     refinements)))
+
 (stest/instrument `validator)
+(stest/instrument `refinements->validators)
