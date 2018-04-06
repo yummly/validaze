@@ -442,7 +442,7 @@
 (defn- -list-validator [user-defined-refinements [refinements inner-type]]
   (let [validator (refinement-kwd->validator refinements inner-type)
         is-user-defined? (contains? user-defined-refinements inner-type)
-        validation-fn (fn [v] (and (sequential? v) (every? #(validator %1) v)))
+        validation-fn (fn [v] (and (sequential? v) (every? #(nil? (validator %1)) v)))
         msg-fn (fn [v] (format "must be a vector of type '%s'%s"
                                (name inner-type)
                                (if is-user-defined?
