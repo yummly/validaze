@@ -838,12 +838,9 @@
                         (map
                          (fn [[refinement [kwd refinement-spec :as refinement-tup]]]
                            (or (set? refinement-spec)
-                               (try
-                                 (binding [primitive-type-to-gen
-                                           (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
-                                   (s/explain ::refinement-tup refinement-tup)
-                                   (s/valid? ::refinement-tup refinement-tup))
-                                 (catch Exception e (println "we are here") (println e)))))
+                               (binding [primitive-type-to-gen
+                                         (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
+                                 (s/valid? ::refinement-tup refinement-tup))))
                          v))))
         :ret (s/map-of keyword? ::validator))
 (defn refinements->validators [refinements]
