@@ -30,6 +30,14 @@
               (specter/transform [specter/MAP-VALS] s/gen selected))
        primitive-type-to-gen))))
 
+(def value-level-value-spec (s/or :primitive ::json-primitive :seq sequential? :map map?))
+(s/def ::value-level-value
+  (s/with-gen
+    value-level-value-spec
+    #(if (not (nil? primitive-type-to-gen))
+       (s/gen ::nonnilable-json-primitive)
+       (s/gen value-level-value-spec))))
+
 (s/def ::json-primitive
   (s/nilable ::nonnilable-json-primitive))
 
@@ -62,7 +70,7 @@
 
 (s/def ::value-level-validation-fn
   (s/with-gen
-    (s/fspec :args (s/cat :v (s/or :primitive ::json-primitive :seq sequential? :map map?))
+    (s/fspec :args (s/cat :v ::value-level-value)
              :ret boolean?)
     validation-fn-gen))
 
@@ -828,13 +836,15 @@
                        (every?
                         identity
                         (map
-                         (fn [[refinement [kwd refinement-spec]]]
+                         (fn [[refinement [kwd refinement-spec :as refinement-tup]]]
                            (or (set? refinement-spec)
-                               (binding [primitive-type-to-gen
-                                         (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
-                                 (not (s/valid? ::refinement-tup refinement-spec)))))
-                         v)))
-                     )
+                               (try
+                                 (binding [primitive-type-to-gen
+                                           (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
+                                   (s/explain ::refinement-tup refinement-tup)
+                                   (s/valid? ::refinement-tup refinement-tup))
+                                 (catch Exception e (println "we are here") (println e)))))
+                         v))))
         :ret (s/map-of keyword? ::validator))
 (defn refinements->validators [refinements]
   (let [[_ refinements] (prepare-refinements refinements normalized-base-refinements)]
