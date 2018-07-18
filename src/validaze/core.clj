@@ -267,7 +267,7 @@
     true))
 
 (s/def ::property-set
-  (s/map-of ::snake-cased-alpha-numeric ::property-attrs))
+  (s/map-of ::snake-cased-alpha-numeric (s/nilable ::property-attrs)))
 
 (s/def ::event-property-set
   #(and (valid-includes? %1)
