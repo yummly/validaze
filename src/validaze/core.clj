@@ -402,7 +402,7 @@
 (defn- super-props-schema->keys-validators [super-properties-schema]
   (let [append-version (fn [acc [version props]]
                          (assoc acc version (merge props (get acc (- version 1)))))
-        denormalized (dissoc (reduce append-version {0 {}} super-properties-schema) 0)]
+        denormalized (reduce append-version {0 {}} super-properties-schema)]
     (specter/transform [specter/MAP-VALS] prop-set->keys-validator denormalized)))
 
 (defn- reify-keys-validator [refinements
@@ -605,7 +605,7 @@
 (defn- validate-single-extended [refinements keys-validators super-keys-validators
                                  properties-validators events-schema-reified
                                  {:strs [event_type event_version properties super_properties_version]
-                                  :or {super_properties_version 1}}]
+                                  :or {super_properties_version 0}}]
   (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
     (let [event-keys-validators (keys-validators event_type)
           event-keys-validator (get event-keys-validators event_version)]
@@ -678,7 +678,7 @@
   (s/keys :req-un [::type ::required?]))
 (s/def ::super-properties-schema
   (s/and
-   (s/map-of integer? (s/map-of ::snake-cased-alpha-numeric ::super-property-field) :min-count 1)
+   (s/map-of integer? (s/map-of ::snake-cased-alpha-numeric ::super-property-field))
    #(one-based-contig-range? (sort (keys %1)))))
 
 (s/def ::property-lists
