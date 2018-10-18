@@ -449,7 +449,6 @@
                                (if is-user-defined?
                                  (format " and '%s' %s" (name inner-type) (some identity (map validator v)))
                                  "")))]
-    (reset! value validation-fn)
     (refinement-kwd->validator (assoc refinements
                                       :list [nil [vector? (fn [_] "must be a vector")]]
                                       :elements [:list [validation-fn msg-fn]]) :elements)))
