@@ -137,8 +137,6 @@
       (map? %1) (into (sorted-map-by order/rank) %1)
       (coll? %1) %1) m))
 
-
-
 (def ^:private vowels #{\a \e \i \o \u})
 (def ^:private normalized-base-refinements
   (let [article #(if (vowels (first %1)) "an" "a")]
@@ -206,7 +204,6 @@
     (s/tuple ::refinements-with-string keyword?)
     #(gen-derived-from-refinements vector)))
 
-(def value (atom nil))
 (s/fdef -refinement-kwd->validator
         :args (s/cat :tup ::refinements-refinement-kwd-tup)
         :fn #(let [[refinements kwd] (-> %1 :args :tup)
