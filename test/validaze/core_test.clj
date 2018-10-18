@@ -57,3 +57,14 @@
                  ::core/validator)]
     (is (gen/sample (s/gen spec) 1000)
         (format "incongruence between spec and its generator: %s" spec))))
+
+(deftest super-props-behave-when-unspecified
+  (let [events-schema {"event1" {1 {"prop1" {:required? true}}}}
+        props-schema [{"prop1" :string}]
+        super-props-schema {1 {"super_prop1" {:type :string :required? true}}}
+        validator-with-super-props (core/validator events-schema props-schema super-props-schema)
+        validator-without-super-props (core/validator events-schema props-schema)
+        event {"event_type" "event1" "event_version" 1 "properties" {"prop1" "blah"}}]
+    (is (= ["Missing required keys: [\"super_prop1\"]."]
+           (validator-with-super-props event)))
+    (is (nil? (validator-without-super-props event)))))

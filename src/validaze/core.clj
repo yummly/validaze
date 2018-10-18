@@ -402,7 +402,8 @@
 (defn- super-props-schema->keys-validators [super-properties-schema]
   (let [append-version (fn [acc [version props]]
                          (assoc acc version (merge props (get acc (- version 1)))))
-        denormalized (reduce append-version {0 {}} super-properties-schema)]
+        reduced (reduce append-version {} super-properties-schema)
+        denormalized (if (empty? reduced) {0 {}} reduced)]
     (specter/transform [specter/MAP-VALS] prop-set->keys-validator denormalized)))
 
 (defn- reify-keys-validator [refinements
@@ -605,7 +606,7 @@
 (defn- validate-single-extended [refinements keys-validators super-keys-validators
                                  properties-validators events-schema-reified
                                  {:strs [event_type event_version properties super_properties_version]
-                                  :or {super_properties_version 0}}]
+                                  :or {super_properties_version (apply min (keys super-keys-validators))}}]
   (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
     (let [event-keys-validators (keys-validators event_type)
           event-keys-validator (get event-keys-validators event_version)]
@@ -839,7 +840,8 @@
                          (fn [[refinement [kwd refinement-spec :as refinement-tup]]]
                            (or (set? refinement-spec)
                                (binding [primitive-type-to-gen
-                                         (refinement->base-refinement (merge v normalized-base-refinements) kwd)]
+                                         (refinement->base-refinement
+                                          (merge v normalized-base-refinements) kwd)]
                                  (s/valid? ::refinement-tup refinement-tup))))
                          v))))
         :ret (s/map-of keyword? ::validator))
