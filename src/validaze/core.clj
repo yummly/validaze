@@ -254,7 +254,10 @@
       #(gen'/string-from-regex regex))))
 (s/def ::required?
   (s/or :bool boolean?
-        :when (s/tuple #{:when} ::snake-cased-alpha-numeric (s/coll-of ::nonnilable-json-primitive :kind set?))))
+        :when (s/tuple #{:when}
+                       ::snake-cased-alpha-numeric
+                       (s/or :set (s/coll-of ::nonnilable-json-primitive :kind set?)
+                             :exists #{:exists}))))
 (s/def ::property-attrs
   (s/keys :req-un [::required?]))
 (def property-spec
@@ -628,7 +631,7 @@
           (validator-fn vec-or-single))]
     (if (empty? errors)
       (success-fn vec-or-single)
-      errors)))
+      (into [] errors))))
 
 (defn- validate-extended [refinements keys-validators super-keys-validators
                           properties-validators events-schema-reified event]
@@ -729,11 +732,15 @@
    (fn [prop req-spec]
      (match req-spec
             [:when other-prop values]
-            [false (fn [o]
-                     (if (contains? values (o other-prop))
-                       (if-not (contains? o prop)
-                         (format "'%s' is required when '%s' is any of: %s"
-                                 prop other-prop values))))]
+            (let [[pred msg] (if (= values :exists)
+                               [#(contains? % other-prop) "exists"]
+                               [#(contains? values (% other-prop))
+                                (format "is any of: %s" values)])]
+              [false (fn [o]
+                       (if (pred o)
+                         (if-not (contains? o prop)
+                           (format "'%s' is required when '%s' %s"
+                                   prop other-prop msg))))])
             :else [req-spec trivial-validator]))
    prop-schema))
 
