@@ -63,7 +63,7 @@
         props-schema [{"prop1" :string}]
         super-props-schema {1 {"super_prop1" {:type :string :required? true}}}
         validator-with-super-props (core/validator events-schema props-schema super-props-schema)
-        validator-without-super-props (core/validator events-schema props-schema super-props-schema)
+        validator-without-super-props (core/validator events-schema props-schema)
         event {"event_type" "event1" "event_version" 1 "properties" {"prop1" "blah"}}]
     (is (= ["Missing required keys: [\"super_prop1\"]."]
            (validator-with-super-props event)))
