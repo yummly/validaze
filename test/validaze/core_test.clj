@@ -68,3 +68,33 @@
     (is (= ["Missing required keys: [\"super_prop1\"]."]
            (validator-with-super-props event)))
     (is (nil? (validator-without-super-props event)))))
+
+(deftest when-prop-works
+  (let [exists-schema {"event1" {1 {"prop1" {:required? false}
+                                    "prop2" {:required? [:when "prop1" :exists]}}}}
+        is-one-of-schema (assoc-in exists-schema ["event1" 1 "prop2" :required?] [:when "prop1" #{"foo" "bar"}])
+        props-schema [{"prop1" :string "prop2" :string}]
+        exists-validator (core/validator exists-schema props-schema)
+        is-one-of-validator (core/validator is-one-of-schema props-schema)
+        base-event {"event_type" "event1" "event_version" 1}]
+    ; exists tests
+    (is (= ["'prop2' is required when 'prop1' exists"]
+           (exists-validator (merge base-event {"properties" {"prop1" "p1"}}))))
+    (is (nil? (exists-validator (merge base-event {"properties" {"prop1" "p1" "prop2" "p2"}}))))
+    (is (nil? (exists-validator (merge base-event {"properties" {}}))))
+    ; is-one-of tests
+    (is (= ["'prop2' is required when 'prop1' is any of: #{\"foo\" \"bar\"}"]
+           (is-one-of-validator (merge base-event {"properties" {"prop1" "foo"}}))))
+    (is (nil? (is-one-of-validator (merge base-event {"properties" {"prop1" "bar" "prop2" "p2"}}))))
+    (is (nil? (is-one-of-validator (merge base-event {"properties" {}}))))))
+
+(deftest errors-returned-as-vector-or-map
+  (let [events-schema {"event1" {1 {"prop1" {:required? true}}}}
+        props-schema [{"prop1" :string}]
+        validator (core/validator events-schema props-schema)
+        event {"event_type" "event1" "event_version" 1 "properties" {}}
+        num-events 10
+        multi-res (validator (repeat num-events event))]
+    (is (vector? (validator event)))
+    (is (map? multi-res))
+    (is (= (sort (keys multi-res)) (range num-events)))))
