@@ -87,3 +87,14 @@
            (is-one-of-validator (merge base-event {"properties" {"prop1" "foo"}}))))
     (is (nil? (is-one-of-validator (merge base-event {"properties" {"prop1" "bar" "prop2" "p2"}}))))
     (is (nil? (is-one-of-validator (merge base-event {"properties" {}}))))))
+
+(deftest errors-returned-as-vector-or-map
+  (let [events-schema {"event1" {1 {"prop1" {:required? true}}}}
+        props-schema [{"prop1" :string}]
+        validator (core/validator events-schema props-schema)
+        event {"event_type" "event1" "event_version" 1 "properties" {}}
+        num-events 10
+        multi-res (validator (repeat num-events event))]
+    (is (vector? (validator event)))
+    (is (map? multi-res))
+    (is (= (sort (keys multi-res)) (range num-events)))))

@@ -627,7 +627,9 @@
           (validator-fn vec-or-single))]
     (if (empty? errors)
       (success-fn vec-or-single)
-      (into [] errors))))
+      (if (sequential? errors)
+        (into [] errors)
+        errors))))
 
 (defn- validate-extended [refinements keys-validators super-keys-validators
                           properties-validators events-schema-reified event]
