@@ -614,8 +614,8 @@
 
 (defn- event->schema [event-schema-reified super-keys-validators keys-validators
                       properties-schema super-properties-schema-raw
-                      super-prop-version event-type event-version]
-  (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
+                      super-properties-version event-type event-version]
+  (if-let [super-keys-validator (get super-keys-validators super-properties-version)]
     (if-let [event-keys-validators (keys-validators event-type)]
       (if-let [event-keys-validator (get event-keys-validators event-version)]
         (let [{keys-req :required keys-optional :optional} (meta event-keys-validator)
