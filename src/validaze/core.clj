@@ -832,7 +832,7 @@
                                 (explode-includes property-lists events-schema-raw))
          events-schema (specter/transform
                         [specter/MAP-VALS specter/MAP-VALS specter/MAP-VALS :required?]
-                        fpirst
+                        first
                         events-schema-reified)
          properties-schema (into-recursively-sorted-map properties-schema)
          super-properties-schema-raw (into-recursively-sorted-map super-properties-schema)
