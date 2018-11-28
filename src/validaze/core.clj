@@ -612,7 +612,7 @@
           (or (-> key event-schema :required? meta :syntax) false)
           (recur events-schema-reified event-type (- event-version 1) key)))))
 
-(defn- event->schema [event-schema-reified super-keys-validators keys-validators
+(defn- event->schema [events-schema-reified super-keys-validators keys-validators
                       properties-schema super-properties-schema-raw
                       super-properties-version event-type event-version]
   (if-let [super-keys-validator (get super-keys-validators super-properties-version)]
