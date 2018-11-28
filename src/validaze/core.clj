@@ -385,7 +385,10 @@
 (defn- keys-validator [required-keys optional-keys]
   (let [missing #(clojure.set/difference (set required-keys) (set (keys %)))
         unexpected #(clojure.set/difference (set (keys %)) (set (concat required-keys optional-keys)))]
-    [missing unexpected]))
+    (with-meta
+      [missing unexpected]
+      {:required required-keys
+       :optional optional-keys})))
 
 (defn- prop-set->keys-validator [field-descs]
   (let [{required true optional false} (group-by #(-> % second :required?) field-descs)
@@ -602,6 +605,38 @@
                     prop-specs)]
     (map #(%1 properties) validators)))
 
+(defn- event-key->optional-spec [events-schema-reified event-type event-version key]
+  (if (< event-version 1) false
+      (let [event-schema ((events-schema-reified event-type) event-version)]
+        (if (contains? event-schema key)
+          (or (-> key event-schema :required? meta :syntax) false)
+          (recur events-schema-reified event-type (- event-version 1) key)))))
+
+(defn- event->schema [event-schema-reified super-keys-validators keys-validators
+                      properties-schema super-properties-schema-raw
+                      super-prop-version event-type event-version]
+  (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
+    (if-let [event-keys-validators (keys-validators event-type)]
+      (if-let [event-keys-validator (get event-keys-validators event-version)]
+        (let [{keys-req :required keys-optional :optional} (meta event-keys-validator)
+              {sup-keys-req :required sup-keys-optional :optional} (meta super-keys-validator)
+              keys-spec (fn [keys req?] (apply merge (map #(do {% {:required? req?}}) keys)))
+              req-keys (keys-spec keys-req true)
+              opt-spec (partial event-key->optional-spec events-schema-reified event-type event-version)
+              opt-keys (apply merge (map #(do {%1 {:required? (opt-spec %1)}}) keys-optional))
+              event-keys (merge req-keys opt-keys)
+              super-keys (merge (keys-spec sup-keys-req true) (keys-spec sup-keys-optional false))
+              merged-prop-schema (apply merge properties-schema)
+              referred-key-props (keys event-keys)
+              event-key-types (apply merge (map #(do {%1 (merged-prop-schema %1)}) referred-key-props))
+              merged-super-prop-schema (apply merge (vals super-properties-schema-raw))
+              referred-super-props (keys super-keys)
+              super-key-types (apply merge (map #(do {%1 (merged-super-prop-schema %1)}) referred-super-props))
+              types (merge event-key-types super-key-types)]
+          {:keys event-keys
+           :super-keys super-keys
+           :types types})))))
+
 (defn- validate-single-extended [refinements keys-validators super-keys-validators
                                  properties-validators events-schema-reified
                                  {:strs [event_type event_version properties super_properties_version]
@@ -609,7 +644,7 @@
   (if-let [super-keys-validator (get super-keys-validators super_properties_version)]
     (let [event-keys-validators (keys-validators event_type)
           event-keys-validator (get event-keys-validators event_version)]
-      (if (and event-keys-validators keys-validator)
+      (if (and event-keys-validators event-keys-validator)
         (let [keys-validator (reify-keys-validator refinements event-keys-validator super-keys-validator)]
           (if-let [msg (keys-validator properties)]
             [msg]
@@ -734,11 +769,14 @@
                                [#(contains? % other-prop) "exists"]
                                [#(contains? values (% other-prop))
                                 (format "is any of: %s" values)])]
-              [false (fn [o]
-                       (if (pred o)
-                         (if-not (contains? o prop)
-                           (format "'%s' is required when '%s' %s"
-                                   prop other-prop msg))))])
+              (with-meta
+                [false
+                 (fn [o]
+                   (if (pred o)
+                     (if-not (contains? o prop)
+                       (format "'%s' is required when '%s' %s"
+                               prop other-prop msg))))]
+                {:syntax [:when other-prop values]}))
             :else [req-spec trivial-validator]))
    prop-schema))
 
@@ -794,7 +832,7 @@
                                 (explode-includes property-lists events-schema-raw))
          events-schema (specter/transform
                         [specter/MAP-VALS specter/MAP-VALS specter/MAP-VALS :required?]
-                        first
+                        fpirst
                         events-schema-reified)
          properties-schema (into-recursively-sorted-map properties-schema)
          super-properties-schema-raw (into-recursively-sorted-map super-properties-schema)
@@ -829,7 +867,9 @@
           :super-properties-schema-reified super-properties-schema-reified
           :super-properties-schemas-flattened super-properties-schemas-flattened
           :user-defined-refinements user-defined-refinements
-          :refinements refinements})))))
+          :refinements refinements
+          :event->schema (partial event->schema events-schema-reified super-keys-validators keys-validators
+                                  properties-schema super-properties-schema-raw)})))))
 
 (defn- refinement->base-refinement [refinements refinement]
   (loop [cur refinement]
