@@ -632,10 +632,11 @@
               merged-super-prop-schema (apply merge (vals super-properties-schema-raw))
               referred-super-props (keys super-keys)
               super-key-types (apply merge (map #(do {%1 (merged-super-prop-schema %1)}) referred-super-props))
-              types (merge event-key-types super-key-types)]
+              types (merge event-key-types super-key-types)
+              reduced (into {} (for [[k v] types] [k (or (:type v) v)]))]
           {:keys event-keys
            :super-keys super-keys
-           :types types})))))
+           :types reduced})))))
 
 (defn- validate-single-extended [refinements keys-validators super-keys-validators
                                  properties-validators events-schema-reified
